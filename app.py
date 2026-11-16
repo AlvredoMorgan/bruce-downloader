@@ -4,7 +4,7 @@ import yt_dlp
 import urllib.request
 import urllib.parse
 import json
-import re
+import os
 
 app = FastAPI()
 
@@ -18,10 +18,6 @@ app.add_middleware(
 @app.get("/")
 def home():
     return {"status": "Mesin Downloader Bruce di Vercel aktif!"}
-
-def extract_yt_id(url: str):
-    match = re.search(r'(?:v=|\/|youtu\.be\/)([0-9A-Za-z_-]{11})', url)
-    return match.group(1) if match else None
 
 @app.get("/download")
 def get_video(url: str):
@@ -48,51 +44,49 @@ def get_video(url: str):
                     }
         except Exception:
             pass
+        return {"success": False, "error": "Gagal memproses video TikTok."}
 
-   # 2. Jalur YouTube via API Publik (Menghindari blokir IP Datacenter Vercel)
-    if "youtube.com" in url or "youtu.be" in url:
-        # Coba via Cobalt API (instance publik)
-        cobalt_instances = [
-            "https://api.cobalt.tools/",
-            "https://cobalt-api.kwiatekmiki.com/"
-        ]
-        for api in cobalt_instances:
-            try:
-                payload = json.dumps({"url": url, "videoQuality": "720"}).encode("utf-8")
-                req = urllib.request.Request(
-                    api,
-                    data=payload,
-                    headers={
-                        "Accept": "application/json",
-                        "Content-Type": "application/json",
-                        "User-Agent": "Mozilla/5.0"
-                    },
-                    method="POST"
-                )
-                with urllib.request.urlopen(req, timeout=10) as res:
-                    cdata = json.loads(res.read().decode("utf-8"))
-                    if cdata.get("url"):
-                        # Ambil juga versi audionya
-                        audio_link = ""
-                        try:
-                            apayload = json.dumps({"url": url, "downloadMode": "audio"}).encode("utf-8")
-                            areq = urllib.request.Request(api, data=apayload, headers={"Accept": "application/json", "Content-Type": "application/json", "User-Agent": "Mozilla/5.0"}, method="POST")
-                            with urllib.request.urlopen(areq, timeout=8) as ares:
-                                adata = json.loads(ares.read().decode("utf-8"))
-                                audio_link = adata.get("url", "")
-                        except Exception:
-                            pass
+    # 2. Jalur YouTube & Platform Lain dengan yt-dlp + Cookies
+    ydl_opts = {
+        'format': 'best[ext=mp4]/best',
+        'quiet': True,
+        'no_warnings': True,
+        'noplaylist': True,
+    }
 
-                        return {
-                            "success": True,
-                            "title": cdata.get("filename") or "Video YouTube",
-                            "thumbnail": f"https://img.youtube.com/vi/{extract_yt_id(url)}/hqdefault.jpg" if extract_yt_id(url) else "",
-                            "downloadUrl": cdata["url"],
-                            "audioUrl": audio_link
-                        }
-            except Exception:
-                continue
+    yt_cookies = os.environ.get("YT_COOKIES")
+    if yt_cookies:
+        cookie_path = "/tmp/cookies.txt"
+        with open(cookie_path, "w", encoding="utf-8") as f:
+            f.write(yt_cookies)
+        ydl_opts['cookiefile'] = cookie_path
 
-        return {"success": False, "error": "Server YouTube sedang membatasi akses. Gunakan link TikTok untuk hasil instan."}
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            video_url = info.get('url')
+            audio_url = ''
 
-    return {"success": False, "error": "Tautan tidak didukung. Masukkan tautan TikTok atau YouTube."}
+            if 'formats' in info:
+                if not video_url:
+                    for f in reversed(info['formats']):
+                        if f.get('ext') == 'mp4' and f.get('url') and f.get('acodec') != 'none':
+                            video_url = f.get('url')
+                            break
+                for f in reversed(info['formats']):
+                    if f.get('vcodec') == 'none' and f.get('acodec') != 'none' and f.get('url'):
+                        audio_url = f.get('url')
+                        break
+
+            if video_url:
+                return {
+                    "success": True,
+                    "title": info.get('title', 'Video Siap Diunduh'),
+                    "thumbnail": info.get('thumbnail', ''),
+                    "downloadUrl": video_url,
+                    "audioUrl": audio_url or video_url
+                }
+            return {"success": False, "error": "Gagal mengekstrak link video."}
+
+    except Exception as e:
+        return {"success": False, "error": f"YouTube Error: {str(e)}"}
