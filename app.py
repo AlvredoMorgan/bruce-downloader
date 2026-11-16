@@ -13,7 +13,7 @@ app.add_middleware(
 
 @app.get("/")
 def home():
-    return {"status": "Mesin yt-dlp Bruce aktif!"}
+    return {"status": "Mesin yt-dlp Bruce di Vercel aktif!"}
 
 @app.get("/download")
 def get_video(url: str):
