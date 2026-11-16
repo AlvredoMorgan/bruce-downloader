@@ -28,7 +28,7 @@ def get_video(url: str):
     if not url:
         return {"success": False, "error": "Link video kosong."}
 
-    # 1. Jalur TikTok (No Watermark)
+    # 1. Jalur TikTok (Video No Watermark + Audio MP3)
     if "tiktok.com" in url:
         try:
             api_url = f"https://www.tikwm.com/api/?url={urllib.parse.quote(url)}"
@@ -36,16 +36,19 @@ def get_video(url: str):
             with urllib.request.urlopen(req, timeout=10) as res:
                 data = json.loads(res.read().decode("utf-8"))
                 if data.get("code") == 0 and data.get("data", {}).get("play"):
+                    tdata = data["data"]
+                    audio_link = tdata.get("music") or tdata.get("music_info", {}).get("play", "")
                     return {
                         "success": True,
-                        "title": data["data"].get("title") or "Video TikTok Tanpa Watermark",
-                        "thumbnail": data["data"].get("cover", ""),
-                        "downloadUrl": data["data"]["play"]
+                        "title": tdata.get("title") or "Video TikTok Tanpa Watermark",
+                        "thumbnail": tdata.get("cover", ""),
+                        "downloadUrl": tdata["play"],
+                        "audioUrl": audio_link
                     }
         except Exception:
             pass
 
-    # 2. Jalur yt-dlp menyamar sebagai klien Android/iOS (Anti Bot-Check YouTube)
+    # 2. Jalur yt-dlp (YouTube & platform lain)
     ydl_opts = {
         'format': 'best[ext=mp4]/best',
         'quiet': True,
@@ -63,11 +66,18 @@ def get_video(url: str):
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
             video_url = info.get('url')
+            audio_url = ''
 
-            if not video_url and 'formats' in info:
+            if 'formats' in info:
+                if not video_url:
+                    for f in reversed(info['formats']):
+                        if f.get('ext') == 'mp4' and f.get('url') and f.get('acodec') != 'none':
+                            video_url = f.get('url')
+                            break
+                # Cari format audio terbaik
                 for f in reversed(info['formats']):
-                    if f.get('ext') == 'mp4' and f.get('url') and f.get('acodec') != 'none':
-                        video_url = f.get('url')
+                    if f.get('vcodec') == 'none' and f.get('acodec') != 'none' and f.get('url'):
+                        audio_url = f.get('url')
                         break
 
             if video_url:
@@ -75,12 +85,13 @@ def get_video(url: str):
                     "success": True,
                     "title": info.get('title', 'Video Siap Diunduh'),
                     "thumbnail": info.get('thumbnail', ''),
-                    "downloadUrl": video_url
+                    "downloadUrl": video_url,
+                    "audioUrl": audio_url
                 }
-    except Exception as e:
-        yt_error = str(e)
+    except Exception:
+        pass
 
-    # 3. Jalur Cadangan YouTube via Piped API (Jika IP Vercel tetap diblokir YouTube)
+    # 3. Jalur Cadangan YouTube via Piped API
     yt_id = extract_yt_id(url)
     if yt_id:
         piped_instances = [
@@ -97,16 +108,18 @@ def get_video(url: str):
                 with urllib.request.urlopen(req, timeout=8) as res:
                     pdata = json.loads(res.read().decode("utf-8"))
                     streams = pdata.get("videoStreams", [])
-                    # Cari video MP4 yang sudah ada audionya (videoOnly == False)
+                    audio_streams = pdata.get("audioStreams", [])
+                    audio_link = audio_streams[0]["url"] if audio_streams else ""
                     for s in streams:
                         if s.get("format") == "MPEG_4" and not s.get("videoOnly") and s.get("url"):
                             return {
                                 "success": True,
                                 "title": pdata.get("title", "Video YouTube"),
                                 "thumbnail": pdata.get("thumbnailUrl", ""),
-                                "downloadUrl": s["url"]
+                                "downloadUrl": s["url"],
+                                "audioUrl": audio_link
                             }
             except Exception:
                 continue
 
-    return {"success": False, "error": "YouTube membatasi akses dari server saat ini. Coba link TikTok atau coba beberapa saat lagi."}
+    return {"success": False, "error": "Gagal memproses video atau platform membatasi akses server."}
