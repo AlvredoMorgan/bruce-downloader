@@ -37,7 +37,8 @@ def get_video(url: str):
                 data = json.loads(res.read().decode("utf-8"))
                 if data.get("code") == 0 and data.get("data", {}).get("play"):
                     tdata = data["data"]
-                    audio_link = tdata.get("music") or tdata.get("music_info", {}).get("play", "")
+                    music_info = tdata.get("music_info") or {}
+                    audio_link = tdata.get("music") or music_info.get("play") or tdata["play"]
                     return {
                         "success": True,
                         "title": tdata.get("title") or "Video TikTok Tanpa Watermark",
@@ -74,7 +75,6 @@ def get_video(url: str):
                         if f.get('ext') == 'mp4' and f.get('url') and f.get('acodec') != 'none':
                             video_url = f.get('url')
                             break
-                # Cari format audio terbaik
                 for f in reversed(info['formats']):
                     if f.get('vcodec') == 'none' and f.get('acodec') != 'none' and f.get('url'):
                         audio_url = f.get('url')
@@ -86,40 +86,9 @@ def get_video(url: str):
                     "title": info.get('title', 'Video Siap Diunduh'),
                     "thumbnail": info.get('thumbnail', ''),
                     "downloadUrl": video_url,
-                    "audioUrl": audio_url
+                    "audioUrl": audio_url or video_url
                 }
     except Exception:
         pass
 
-    # 3. Jalur Cadangan YouTube via Piped API
-    yt_id = extract_yt_id(url)
-    if yt_id:
-        piped_instances = [
-            "https://pipedapi.kavin.rocks",
-            "https://api.piped.private.coffee",
-            "https://pipedapi.adminforge.de"
-        ]
-        for instance in piped_instances:
-            try:
-                req = urllib.request.Request(
-                    f"{instance}/streams/{yt_id}",
-                    headers={"User-Agent": "Mozilla/5.0"}
-                )
-                with urllib.request.urlopen(req, timeout=8) as res:
-                    pdata = json.loads(res.read().decode("utf-8"))
-                    streams = pdata.get("videoStreams", [])
-                    audio_streams = pdata.get("audioStreams", [])
-                    audio_link = audio_streams[0]["url"] if audio_streams else ""
-                    for s in streams:
-                        if s.get("format") == "MPEG_4" and not s.get("videoOnly") and s.get("url"):
-                            return {
-                                "success": True,
-                                "title": pdata.get("title", "Video YouTube"),
-                                "thumbnail": pdata.get("thumbnailUrl", ""),
-                                "downloadUrl": s["url"],
-                                "audioUrl": audio_link
-                            }
-            except Exception:
-                continue
-
-    return {"success": False, "error": "Gagal memproses video atau platform membatasi akses server."}
+    return {"success": False, "error": "Gagal memproses video."}
