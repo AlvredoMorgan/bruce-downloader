@@ -4,6 +4,7 @@ import yt_dlp
 import urllib.request
 import urllib.parse
 import json
+import re
 
 app = FastAPI()
 
@@ -18,12 +19,16 @@ app.add_middleware(
 def home():
     return {"status": "Mesin Downloader Bruce di Vercel aktif!"}
 
+def extract_yt_id(url: str):
+    match = re.search(r'(?:v=|\/|youtu\.be\/)([0-9A-Za-z_-]{11})', url)
+    return match.group(1) if match else None
+
 @app.get("/download")
 def get_video(url: str):
     if not url:
         return {"success": False, "error": "Link video kosong."}
 
-    # Jalur TikTok (No Watermark)
+    # 1. Jalur TikTok (No Watermark)
     if "tiktok.com" in url:
         try:
             api_url = f"https://www.tikwm.com/api/?url={urllib.parse.quote(url)}"
@@ -40,14 +45,17 @@ def get_video(url: str):
         except Exception:
             pass
 
-    # Jalur yt-dlp (YouTube & platform lain)
+    # 2. Jalur yt-dlp menyamar sebagai klien Android/iOS (Anti Bot-Check YouTube)
     ydl_opts = {
         'format': 'best[ext=mp4]/best',
         'quiet': True,
         'no_warnings': True,
         'noplaylist': True,
-        'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['android', 'ios'],
+                'skip': ['webpage']
+            }
         }
     }
 
@@ -69,7 +77,36 @@ def get_video(url: str):
                     "thumbnail": info.get('thumbnail', ''),
                     "downloadUrl": video_url
                 }
-            return {"success": False, "error": "Gagal mengekstrak link MP4 langsung."}
-
     except Exception as e:
-        return {"success": False, "error": f"Error: {str(e)}"}
+        yt_error = str(e)
+
+    # 3. Jalur Cadangan YouTube via Piped API (Jika IP Vercel tetap diblokir YouTube)
+    yt_id = extract_yt_id(url)
+    if yt_id:
+        piped_instances = [
+            "https://pipedapi.kavin.rocks",
+            "https://api.piped.private.coffee",
+            "https://pipedapi.adminforge.de"
+        ]
+        for instance in piped_instances:
+            try:
+                req = urllib.request.Request(
+                    f"{instance}/streams/{yt_id}",
+                    headers={"User-Agent": "Mozilla/5.0"}
+                )
+                with urllib.request.urlopen(req, timeout=8) as res:
+                    pdata = json.loads(res.read().decode("utf-8"))
+                    streams = pdata.get("videoStreams", [])
+                    # Cari video MP4 yang sudah ada audionya (videoOnly == False)
+                    for s in streams:
+                        if s.get("format") == "MPEG_4" and not s.get("videoOnly") and s.get("url"):
+                            return {
+                                "success": True,
+                                "title": pdata.get("title", "Video YouTube"),
+                                "thumbnail": pdata.get("thumbnailUrl", ""),
+                                "downloadUrl": s["url"]
+                            }
+            except Exception:
+                continue
+
+    return {"success": False, "error": "YouTube membatasi akses dari server saat ini. Coba link TikTok atau coba beberapa saat lagi."}
