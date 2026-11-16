@@ -49,46 +49,50 @@ def get_video(url: str):
         except Exception:
             pass
 
-    # 2. Jalur yt-dlp (YouTube & platform lain)
-    ydl_opts = {
-        'format': 'best[ext=mp4]/best',
-        'quiet': True,
-        'no_warnings': True,
-        'noplaylist': True,
-        'extractor_args': {
-            'youtube': {
-                'player_client': ['android', 'ios'],
-                'skip': ['webpage']
-            }
-        }
-    }
+   # 2. Jalur YouTube via API Publik (Menghindari blokir IP Datacenter Vercel)
+    if "youtube.com" in url or "youtu.be" in url:
+        # Coba via Cobalt API (instance publik)
+        cobalt_instances = [
+            "https://api.cobalt.tools/",
+            "https://cobalt-api.kwiatekmiki.com/"
+        ]
+        for api in cobalt_instances:
+            try:
+                payload = json.dumps({"url": url, "videoQuality": "720"}).encode("utf-8")
+                req = urllib.request.Request(
+                    api,
+                    data=payload,
+                    headers={
+                        "Accept": "application/json",
+                        "Content-Type": "application/json",
+                        "User-Agent": "Mozilla/5.0"
+                    },
+                    method="POST"
+                )
+                with urllib.request.urlopen(req, timeout=10) as res:
+                    cdata = json.loads(res.read().decode("utf-8"))
+                    if cdata.get("url"):
+                        # Ambil juga versi audionya
+                        audio_link = ""
+                        try:
+                            apayload = json.dumps({"url": url, "downloadMode": "audio"}).encode("utf-8")
+                            areq = urllib.request.Request(api, data=apayload, headers={"Accept": "application/json", "Content-Type": "application/json", "User-Agent": "Mozilla/5.0"}, method="POST")
+                            with urllib.request.urlopen(areq, timeout=8) as ares:
+                                adata = json.loads(ares.read().decode("utf-8"))
+                                audio_link = adata.get("url", "")
+                        except Exception:
+                            pass
 
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            video_url = info.get('url')
-            audio_url = ''
+                        return {
+                            "success": True,
+                            "title": cdata.get("filename") or "Video YouTube",
+                            "thumbnail": f"https://img.youtube.com/vi/{extract_yt_id(url)}/hqdefault.jpg" if extract_yt_id(url) else "",
+                            "downloadUrl": cdata["url"],
+                            "audioUrl": audio_link
+                        }
+            except Exception:
+                continue
 
-            if 'formats' in info:
-                if not video_url:
-                    for f in reversed(info['formats']):
-                        if f.get('ext') == 'mp4' and f.get('url') and f.get('acodec') != 'none':
-                            video_url = f.get('url')
-                            break
-                for f in reversed(info['formats']):
-                    if f.get('vcodec') == 'none' and f.get('acodec') != 'none' and f.get('url'):
-                        audio_url = f.get('url')
-                        break
+        return {"success": False, "error": "Server YouTube sedang membatasi akses. Gunakan link TikTok untuk hasil instan."}
 
-            if video_url:
-                return {
-                    "success": True,
-                    "title": info.get('title', 'Video Siap Diunduh'),
-                    "thumbnail": info.get('thumbnail', ''),
-                    "downloadUrl": video_url,
-                    "audioUrl": audio_url or video_url
-                }
-    except Exception:
-        pass
-
-    return {"success": False, "error": "Gagal memproses video."}
+    return {"success": False, "error": "Tautan tidak didukung. Masukkan tautan TikTok atau YouTube."}
